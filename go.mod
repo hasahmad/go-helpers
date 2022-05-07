@@ -7,4 +7,4 @@ require (
 	github.com/google/uuid v1.3.0
 )
 
-exclude github.com/hasahmad/go-helpers v1.0.2
+exclude github.com/hasahmad/go-helpers v1.0.0
