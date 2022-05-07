@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -14,86 +13,61 @@ import (
 	"github.com/google/uuid"
 )
 
-func ReadIDParam(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id < 1 {
-		return 0, errors.New("invalid id parameter")
+var (
+	ErrNotExistsInRequestParams = errors.New("invalid parameter")
+	errInvalidParamText         = "invalid %s parameter"
+)
+
+func HasKeyInReqParams(r *http.Request, key string) bool {
+	return InArray[string](
+		[]string{key},
+		chi.NewRouteContext().URLParams.Keys,
+		false,
+	)
+}
+func ReadParam(r *http.Request, key string) (string, bool, error) {
+	var value string
+	keyExists := !HasKeyInReqParams(r, key)
+	if !keyExists {
+		return value, false, ErrNotExistsInRequestParams
 	}
 
-	return id, nil
+	value = chi.URLParam(r, key)
+	if value == "" {
+		return value, keyExists, fmt.Errorf(errInvalidParamText, key)
+	}
+
+	return value, keyExists, nil
 }
 
-func ReadUUIDParam(r *http.Request) (uuid.UUID, error) {
-	id := chi.URLParam(r, "id")
+func ReadUUIDParam(r *http.Request, key string) (uuid.UUID, bool, error) {
 	var uid uuid.UUID
-
-	if id == "" {
-		return uid, errors.New("invalid id parameter")
+	value, keyExists, err := ReadParam(r, key)
+	if err != nil {
+		return uid, keyExists, err
 	}
 
-	err := uid.Scan(id)
+	err = uid.Scan(value)
 	if err != nil || uid.String() == "" {
-		return uid, errors.New("invalid id parameter")
+		return uid, keyExists, fmt.Errorf(errInvalidParamText, key)
 	}
 
-	return uid, nil
+	return uid, keyExists, nil
 }
 
-func ReadUUIDParamByKey(r *http.Request, key string) (uuid.UUID, error) {
-	var uid uuid.UUID
-	if key == "" {
-		key = "id"
-	}
-
-	id := chi.URLParam(r, key)
-	if id == "" {
-		return uid, fmt.Errorf("invalid %s parameter", key)
-	}
-
-	err := uid.Scan(id)
-	if err != nil || uid.String() == "" {
-		return uid, fmt.Errorf("invalid %s parameter", key)
-	}
-
-	return uid, nil
-}
-
-func ReadOptionalUUIDParamByKey(r *http.Request, key string) (uuid.UUID, error) {
-	var uid uuid.UUID
-	if key == "" {
-		key = "id"
-	}
-
-	id := chi.URLParam(r, key)
-	if id == "" {
-		return uid, nil
-	}
-
-	err := uid.Scan(id)
-	if err != nil || uid.String() == "" {
-		return uid, fmt.Errorf("invalid %s parameter", key)
-	}
-
-	return uid, nil
-}
-
-func ReadNullUUIDParamByKey(r *http.Request, key string) (uuid.NullUUID, error) {
+func ReadNullUUIDParam(r *http.Request, key string) (uuid.NullUUID, bool, error) {
 	var uid uuid.NullUUID
-	if key == "" {
-		key = "id"
+	value, keyExists, err := ReadParam(r, key)
+	if err != nil {
+		return uid, keyExists, err
 	}
 
-	id := chi.URLParam(r, key)
-	if id == "" {
-		return uid, fmt.Errorf("invalid %s parameter", key)
-	}
-
-	err := uid.Scan(id)
+	err = uid.Scan(value)
 	if err != nil || !uid.Valid || uid.UUID.String() == "" {
-		return uid, fmt.Errorf("invalid %s parameter", key)
+		return uid, keyExists, fmt.Errorf(errInvalidParamText, key)
 	}
 
-	return uid, nil
+	return uid, keyExists, nil
 }
 
 func ReadJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
@@ -143,56 +117,49 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
 }
 
 // ReadString read string value from request
-// return default value if empty string
-func ReadString(qs url.Values, key string, defaultValue string) (string, bool) {
-	exists := qs.Has(key)
-	s := qs.Get(key)
+func ReadString(r *http.Request, key string, defaultValue string) (string, bool, error) {
+	value, exists, err := ReadParam(r, key)
 
-	if s == "" {
-		return defaultValue, exists
+	if err != nil {
+		return defaultValue, exists, err
 	}
 
-	return s, exists
+	return value, exists, nil
 }
 
 // ReadBool read true or false values from request
-// return default value if value is empty or is not one of true/false values
-func ReadBool(qs url.Values, key string, defaultValue bool) (bool, bool) {
-	s := qs.Get(key)
+func ReadBool(r *http.Request, key string, defaultValue bool) (bool, bool, error) {
+	s, exists, err := ReadParam(r, key)
 
-	if s == "" {
-		return defaultValue, false
+	if err != nil {
+		return defaultValue, exists, err
 	}
 
 	if s == "true" || s == "t" || s == "y" || s == "1" {
-		return true, true
+		return true, exists, nil
 	} else if s == "false" || s == "f" || s == "n" || s == "0" {
-		return false, true
+		return false, exists, nil
 	}
 
-	return defaultValue, true
+	return defaultValue, exists, nil
 }
 
 // ReadCSV read string by separating by comma
-// return default value if empty string
-func ReadCSV(qs url.Values, key string, defaultValue []string) ([]string, bool) {
-	csv := qs.Get(key)
+func ReadCSV(r *http.Request, key string, defaultValue []string) ([]string, bool, error) {
+	csv, exists, err := ReadParam(r, key)
 
-	if csv == "" {
-		return defaultValue, false
+	if err != nil {
+		return defaultValue, exists, err
 	}
 
-	return strings.Split(csv, ","), true
+	return strings.Split(csv, ","), exists, nil
 }
 
 // ReadInt read int from request
-// returns the (value, whether it's valid, error)
-// return default value with invalid flag if empty
-func ReadInt(qs url.Values, key string, defaultValue int) (int, bool, error) {
-	s := qs.Get(key)
-
-	if s == "" {
-		return defaultValue, false, nil
+func ReadInt(r *http.Request, key string, defaultValue int) (int, bool, error) {
+	s, exists, err := ReadParam(r, key)
+	if err != nil {
+		return defaultValue, exists, err
 	}
 
 	i, err := strconv.Atoi(s)
@@ -203,11 +170,10 @@ func ReadInt(qs url.Values, key string, defaultValue int) (int, bool, error) {
 	return i, true, nil
 }
 
-func ReadFloat(qs url.Values, key string, defaultValue float64) (float64, bool, error) {
-	s := qs.Get(key)
-
-	if s == "" {
-		return defaultValue, false, nil
+func ReadFloat(r *http.Request, key string, defaultValue float64) (float64, bool, error) {
+	s, exists, err := ReadParam(r, key)
+	if err != nil {
+		return defaultValue, exists, err
 	}
 
 	val, err := strconv.ParseFloat(s, 32)
