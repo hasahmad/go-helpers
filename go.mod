@@ -7,4 +7,4 @@ require (
 	github.com/google/uuid v1.3.0
 )
 
-exclude github.com/prometheus/client_golang v0.0.1
+exclude github.com/prometheus/client_golang v1.0.0
